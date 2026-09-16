@@ -1,10 +1,10 @@
-"""Live agent harness runtime using standard HTTP foundation model endpoints."""
+"""Live agent harness runtime supporting OpenAI, Google Gemini, Groq, and Ollama."""
 
+from collections.abc import Callable
+from dataclasses import dataclass, field
 import json
 import os
 import re
-from collections.abc import Callable
-from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -13,6 +13,40 @@ from agentir.domain.agent import AgentSpec
 from agentir.domain.exceptions import SecurityError
 from agentir.domain.manifest import AgentIRManifest
 from agentir.domain.tool import ToolSpec
+
+# Pre-configured providers and their standard OpenAI-compatible endpoints
+PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
+    "gemini": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "env_keys": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "AGENTIR_API_KEY", "OPENAI_API_KEY"],
+        "default_model": "gemini-1.5-flash",
+    },
+    "google": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "env_keys": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "AGENTIR_API_KEY", "OPENAI_API_KEY"],
+        "default_model": "gemini-1.5-flash",
+    },
+    "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "env_keys": ["OPENAI_API_KEY", "AGENTIR_API_KEY"],
+        "default_model": "gpt-4o",
+    },
+    "groq": {
+        "base_url": "https://api.groq.com/openai/v1",
+        "env_keys": ["GROQ_API_KEY", "AGENTIR_API_KEY"],
+        "default_model": "llama-3.3-70b-versatile",
+    },
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "env_keys": ["OPENROUTER_API_KEY", "AGENTIR_API_KEY"],
+        "default_model": "google/gemini-2.0-flash",
+    },
+    "ollama": {
+        "base_url": "http://localhost:11434/v1",
+        "env_keys": [],
+        "default_model": "llama3",
+    },
+}
 
 
 @dataclass
@@ -42,24 +76,52 @@ class LiveRuntime:
         self,
         base_url: str | None = None,
         api_key: str | None = None,
+        provider: str | None = None,
+        model_id: str | None = None,
         timeout_seconds: float = 60.0,
         tool_executor: Callable[[ToolSpec, dict[str, Any]], str] | None = None,
         approval_hook: Callable[[str, dict[str, Any]], bool] | None = None,
     ) -> None:
-        self.api_key = (
-            api_key
-            or os.environ.get("OPENAI_API_KEY")
-            or os.environ.get("AGENTIR_API_KEY")
-            or ""
-        )
-        self.base_url = (
-            base_url
-            or os.environ.get("OPENAI_BASE_URL")
-            or "https://api.openai.com/v1"
-        ).rstrip("/")
+        self.provider = self.resolve_provider(provider, model_id)
+        cfg = PROVIDER_CONFIGS.get(self.provider, PROVIDER_CONFIGS["openai"])
+
+        # 1. Resolve API key from arguments or provider-specific environment variables
+        resolved_key = api_key
+        if not resolved_key:
+            for env_var in cfg["env_keys"]:
+                val = os.environ.get(env_var)
+                if val:
+                    resolved_key = val
+                    break
+        self.api_key = resolved_key or ""
+
+        # 2. Resolve Base URL
+        env_base = os.environ.get("OPENAI_BASE_URL") or os.environ.get("GEMINI_BASE_URL")
+        self.base_url = (base_url or env_base or cfg["base_url"]).rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.tool_executor = tool_executor or self._default_tool_executor
         self.approval_hook = approval_hook or (lambda _name, _args: True)
+
+    @staticmethod
+    def resolve_provider(provider_hint: str | None = None, model_id: str | None = None) -> str:
+        """Infer foundation model provider from hint or model ID."""
+        if provider_hint:
+            p = provider_hint.lower().strip()
+            if p in ("gemini", "google"):
+                return "gemini"
+            if p in PROVIDER_CONFIGS:
+                return p
+
+        if model_id:
+            m = model_id.lower().strip()
+            if m.startswith("gemini"):
+                return "gemini"
+            if m.startswith("gpt") or m.startswith("o1") or m.startswith("o3"):
+                return "openai"
+            if m.startswith("llama") or m.startswith("qwen") or m.startswith("mistral"):
+                return "ollama"
+
+        return "openai"
 
     def chat_turn(
         self,
@@ -95,7 +157,11 @@ class LiveRuntime:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        model_id = target_agent.model.model_id or "gpt-4o"
+        model_id = target_agent.model.model_id
+        if not model_id or model_id == "default":
+            cfg = PROVIDER_CONFIGS.get(self.provider, PROVIDER_CONFIGS["openai"])
+            model_id = cfg["default_model"]
+
         temperature = (
             target_agent.model.temperature
             if target_agent.model.temperature is not None
@@ -202,7 +268,6 @@ class LiveRuntime:
             for g in agent.instructions.guidelines:
                 parts.append(f"- {g}")
 
-        # If skills attached, include skill instructions
         if agent.skills:
             parts.append("\nActive Skills:")
             for skill in agent.skills:

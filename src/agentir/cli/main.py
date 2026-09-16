@@ -1,6 +1,5 @@
 """AgentIR CLI — Command Line Interface for Agent Intermediate Representation."""
 
-import os
 import platform
 import sys
 from pathlib import Path
@@ -576,11 +575,12 @@ def run(
 @app.command()
 def chat(
     path: Annotated[Path | None, typer.Argument(help="Manifest path (auto-discovered)")] = None,
+    provider: Annotated[str | None, typer.Option("-p", "--provider")] = None,
     base_url: Annotated[str | None, typer.Option("--base-url", help="Endpoint URL")] = None,
     api_key: Annotated[str | None, typer.Option("--api-key", help="API key")] = None,
     model: Annotated[str | None, typer.Option("-m", "--model", help="Model override")] = None,
 ) -> None:
-    """Chat live with an AgentIR agent using real foundation models (OpenAI, Ollama, Groq)."""
+    """Chat live with an AgentIR agent using real foundation models (Gemini, OpenAI, Ollama)."""
     try:
         manifest_path = find_manifest(path)
         manifest = load_manifest_from_file(manifest_path)
@@ -593,33 +593,23 @@ def chat(
         raise typer.Exit(code=1)
 
     target_agent = manifest.agents[0]
-    if model:
+    effective_provider = provider or target_agent.model.provider
+    effective_model = model or target_agent.model.model_id
+    resolved_provider = LiveRuntime.resolve_provider(effective_provider, effective_model)
+
+    if model or provider:
         target_agent = AgentSpec(
             id=target_agent.id,
             name=target_agent.name,
-            model=ModelSpec(provider=target_agent.model.provider, model_id=model),
+            model=ModelSpec(
+                provider=resolved_provider,
+                model_id=effective_model or "default",
+            ),
             instructions=target_agent.instructions,
             tools=target_agent.tools,
             skills=target_agent.skills,
             guards=target_agent.guards,
         )
-
-    resolved_base_url = (
-        base_url or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
-    )
-    resolved_api_key = (
-        api_key or os.environ.get("OPENAI_API_KEY") or os.environ.get("AGENTIR_API_KEY")
-    )
-
-    is_local = "localhost" in resolved_base_url or "127.0.0.1" in resolved_base_url
-    if not resolved_api_key and not is_local:
-        console.print(
-            "\n[bold yellow]Notice:[/bold yellow] No OPENAI_API_KEY found in environment.\n"
-            "• Provide one via [bold]export OPENAI_API_KEY=sk-...[/bold]\n"
-            "• Or point to local Ollama with [bold]--base-url http://localhost:11434/v1[/bold]\n"
-            "• Or run [bold]agentir run[/bold] for offline deterministic simulation.\n"
-        )
-        raise typer.Exit(code=1)
 
     def approval_prompt(name: str, args: dict[str, Any]) -> bool:
         prompt_str = f"[bold yellow]Execute tool '{name}' ({args})? [y/N]: [/bold yellow]"
@@ -627,16 +617,36 @@ def chat(
         return choice in ("y", "yes")
 
     runtime = LiveRuntime(
-        base_url=resolved_base_url,
-        api_key=resolved_api_key,
+        base_url=base_url,
+        api_key=api_key,
+        provider=resolved_provider,
+        model_id=effective_model,
         approval_hook=approval_prompt,
     )
+
+    is_local = "localhost" in runtime.base_url or "127.0.0.1" in runtime.base_url
+    if not runtime.api_key and not is_local:
+        if resolved_provider == "gemini":
+            console.print(
+                "\n[bold yellow]Notice:[/bold yellow] No GEMINI_API_KEY found in environment.\n"
+                "• Set one via: [bold]export GEMINI_API_KEY=...[/bold]\n"
+                "• Get a free key from Google AI Studio: [cyan]https://aistudio.google.com/[/cyan]\n"
+                "• Or run [bold]agentir run[/bold] for offline deterministic simulation.\n"
+            )
+        else:
+            console.print(
+                "\n[bold yellow]Notice:[/bold yellow] No API key found in environment.\n"
+                "• Set one via: [bold]export OPENAI_API_KEY=sk-...[/bold]\n"
+                "• Or point to local Ollama with: [bold]--base-url http://localhost:11434/v1[/bold]\n"
+                "• Or run [bold]agentir run[/bold] for offline deterministic simulation.\n"
+            )
+        raise typer.Exit(code=1)
 
     console.print(
         f"\n[bold cyan]AgentIR Live Agent Harness[/bold cyan] • "
         f"Agent: [bold green]{target_agent.name}[/bold green] "
-        f"([blue]{target_agent.model.model_id}[/blue])\n"
-        f"[dim]Endpoint: {resolved_base_url} • Type 'exit' to quit[/dim]\n"
+        f"([blue]{target_agent.model.model_id}[/blue] on [magenta]{resolved_provider}[/magenta])\n"
+        f"[dim]Endpoint: {runtime.base_url} • Type 'exit' to quit[/dim]\n"
     )
 
     messages: list[dict[str, Any]] = []

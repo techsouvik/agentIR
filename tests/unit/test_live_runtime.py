@@ -151,3 +151,64 @@ def test_live_runtime_guard_abort() -> None:
     with pytest.raises(SecurityError) as exc_info:
         runtime.chat_turn(manifest, messages=[{"role": "user", "content": "My SSN is 000-12-3456"}])
     assert "blocked by guard" in str(exc_info.value).lower()
+
+
+def test_live_runtime_gemini_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LiveRuntime must auto-resolve Google Gemini base_url and GEMINI_API_KEY."""
+    monkeypatch.setenv("GEMINI_API_KEY", "AIzaSyMockGeminiKey123")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    # Inferred from model_id
+    runtime = LiveRuntime(model_id="gemini-1.5-pro")
+    assert runtime.provider == "gemini"
+    assert "generativelanguage.googleapis.com" in runtime.base_url
+    assert runtime.api_key == "AIzaSyMockGeminiKey123"
+
+    # Inferred from provider hint "google"
+    runtime_google = LiveRuntime(provider="google")
+    assert runtime_google.provider == "gemini"
+    assert "generativelanguage.googleapis.com" in runtime_google.base_url
+
+
+def test_live_runtime_gemini_chat_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test full chat turn against simulated Gemini endpoint."""
+    monkeypatch.setenv("GEMINI_API_KEY", "AIzaSyMockGeminiKey123")
+
+    mock_gemini_reply = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "Hello from Gemini 1.5 Flash!",
+                }
+            }
+        ]
+    }
+
+    captured_url = ""
+    captured_headers: dict[str, str] = {}
+
+    def mock_gemini_post(
+        _self: Any, url: str, headers: dict[str, str] | None = None, **_kwargs: Any
+    ) -> _MockResponse:
+        nonlocal captured_url, captured_headers
+        captured_url = str(url)
+        captured_headers = dict(headers or {})
+        return _MockResponse(mock_gemini_reply)
+
+    monkeypatch.setattr(httpx.Client, "post", mock_gemini_post)
+
+    agent = AgentSpec(
+        id="gemini_bot",
+        name="Gemini Bot",
+        model=ModelSpec(provider="gemini", model_id="gemini-1.5-flash"),
+        instructions=InstructionsSpec(system_prompt="You are powered by Gemini."),
+    )
+    manifest = AgentIRManifest(name="Gemini App", agents=(agent,))
+
+    runtime = LiveRuntime(provider="gemini")
+    turn = runtime.chat_turn(manifest, messages=[{"role": "user", "content": "Hi Gemini"}])
+
+    assert turn.assistant_reply == "Hello from Gemini 1.5 Flash!"
+    assert "generativelanguage.googleapis.com" in captured_url
+    assert captured_headers.get("Authorization") == "Bearer AIzaSyMockGeminiKey123"
