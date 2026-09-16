@@ -7,6 +7,10 @@ from agentir.analysis.diff import (
     compare_agents,
     compare_manifests,
 )
+from agentir.analysis.fsm import (
+    DeterministicFSM,
+    FSMValidationReport,
+)
 from agentir.analysis.verification import (
     VerificationCheck,
     VerificationReport,
@@ -14,8 +18,10 @@ from agentir.analysis.verification import (
 )
 
 __all__ = [
+    "DeterministicFSM",
     "DiffCategory",
     "DiffEntry",
+    "FSMValidationReport",
     "SemanticDiffReport",
     "VerificationCheck",
     "VerificationReport",

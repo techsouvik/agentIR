@@ -30,6 +30,7 @@ from agentir.cli.presentation import (
     render_inspect,
     render_verification,
 )
+from agentir.compiler.passes import create_default_pass_pipeline
 from agentir.compiler.pipeline import compile_migration
 from agentir.domain.agent import AgentSpec
 from agentir.domain.exceptions import AgentIRError, SecurityError
@@ -502,6 +503,63 @@ def verify(
 
 
 @app.command()
+def optimize(
+    path: Annotated[Path | None, typer.Argument(help="Manifest path (auto-discovered)")] = None,
+    output: Annotated[Path | None, typer.Option("-o", "--output", help="Save path")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="JSON output")] = False,
+) -> None:
+    """Run deterministic compiler optimization passes in microsecond execution time."""
+    try:
+        manifest_path = find_manifest(path)
+        manifest = load_manifest_from_file(manifest_path)
+    except Exception as e:
+        print_error("Could not load manifest", str(e))
+        raise typer.Exit(code=1) from e
+
+    pipeline = create_default_pass_pipeline()
+    optimized, results = pipeline.run(manifest)
+
+    total_mutations = sum(r.mutations_count for r in results)
+    total_micros = sum(r.duration_micros for r in results)
+
+    if output:
+        content = serialize_manifest_to_yaml(optimized)
+        output.write_text(content, encoding="utf-8")
+
+    if json_output:
+        output_json(
+            {
+                "original_file": str(manifest_path),
+                "total_duration_micros": total_micros,
+                "total_mutations": total_mutations,
+                "passes": [
+                    {
+                        "pass": r.pass_name,
+                        "duration_micros": r.duration_micros,
+                        "mutations": r.mutations_count,
+                        "messages": list(r.messages),
+                    }
+                    for r in results
+                ],
+                "output_file": str(output) if output else None,
+            }
+        )
+    else:
+        console.print(
+            f"\n[bold cyan]AgentIR Optimizer Pipeline[/bold cyan] • "
+            f"Executed {len(results)} pass(es) in [bold green]{total_micros:.1f}µs[/bold green] "
+            f"({total_mutations} mutation(s))\n"
+        )
+        for r in results:
+            badge = "[green]PRUNED[/green]" if r.mutations_count > 0 else "[dim]CLEAN[/dim]"
+            console.print(f"  • {badge} [bold]{r.pass_name}[/bold] ({r.duration_micros}µs)")
+            for m in r.messages:
+                console.print(f"    [dim]{m}[/dim]")
+        if output:
+            print_success(f"Saved optimized manifest to '{output}'.")
+
+
+@app.command()
 def run(
     path: Annotated[Path | None, typer.Argument(help="Manifest path")] = None,
     input_text: Annotated[str | None, typer.Option("-i", "--input", help="User input")] = None,
@@ -779,6 +837,7 @@ app.command(name="sim", help="Alias for 'run'")(run)
 app.command(name="doc", help="Alias for 'doctor'")(doctor)
 app.command(name="cap", help="Alias for 'capabilities'")(capabilities)
 app.command(name="show", help="Alias for 'inspect'")(inspect)
+app.command(name="opt", help="Alias for 'optimize'")(optimize)
 
 
 if __name__ == "__main__":

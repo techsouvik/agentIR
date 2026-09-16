@@ -8,6 +8,7 @@ from typing import Any
 from agentir.adapters.registry import get_adapter
 from agentir.capabilities.analyzer import analyze_compatibility
 from agentir.capabilities.status import CompatibilityReport, SemanticLossRisk
+from agentir.compiler.passes import create_default_pass_pipeline
 from agentir.domain.exceptions import CompatibilityError
 from agentir.domain.manifest import AgentIRManifest
 from agentir.schema.canonical import compute_canonical_hash
@@ -111,7 +112,12 @@ def compile_migration(
     out_dir = Path(output_directory).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    plan = plan_migration(manifest, target_framework, force=force)
+    # 1. Execute deterministic compiler optimization passes
+    pass_pipeline = create_default_pass_pipeline()
+    optimized_manifest, pass_results = pass_pipeline.run(manifest)
+
+    # 2. Plan migration with optimized manifest
+    plan = plan_migration(optimized_manifest, target_framework, force=force)
 
     if not plan.can_proceed:
         msg = (
@@ -129,13 +135,15 @@ def compile_migration(
         )
 
     adapter = get_adapter(target_framework)
-    generated_files = list(adapter.export_manifest(manifest, out_dir))
+    generated_files = list(adapter.export_manifest(optimized_manifest, out_dir))
 
     report_path: Path | None = None
     report_json_path: Path | None = None
 
     if generate_report:
-        report_md, report_data = _generate_migration_report(manifest, plan, generated_files)
+        report_md, report_data = _generate_migration_report(
+            optimized_manifest, plan, generated_files
+        )
 
         report_path = out_dir / "MIGRATION_REPORT.md"
         report_path.write_text(report_md, encoding="utf-8")
