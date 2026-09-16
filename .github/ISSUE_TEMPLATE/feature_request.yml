@@ -1,0 +1,32 @@
+name: Feature Request
+description: Propose a new adapter, capability dimension, compiler pass, or CLI command.
+labels: ["enhancement", "proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We love proposals for new framework adapters, interoperability protocols, and optimizations!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Use Case
+      description: What challenge or workflow limitation does this proposal address?
+      placeholder: "I want to migrate agents from framework X to framework Y..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe your proposed solution or API change in detail.
+      placeholder: "Add an adapter under src/agentir/adapters/..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other approaches or workarounds have you considered?

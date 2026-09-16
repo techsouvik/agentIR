@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/techsouvik/agentIR/discussions
+    about: Ask questions, share ideas, and discuss agent architectures.
+  - name: Security Vulnerability Reporting
+    url: https://github.com/techsouvik/agentIR/security/policy
+    about: Privately report security vulnerabilities.

@@ -53,6 +53,7 @@ app = typer.Typer(
     name="agentir",
     help="AgentIR — Framework-neutral intermediate representation and compiler for AI agents.",
     no_args_is_help=True,
+    pretty_exceptions_enable=False,
 )
 
 
@@ -60,9 +61,10 @@ app = typer.Typer(
 def main(
     verbose: Annotated[bool, typer.Option("-v", "--verbose", help="Verbose logs")] = False,
     quiet: Annotated[bool, typer.Option("-q", "--quiet", help="Quiet output")] = False,
+    debug: Annotated[bool, typer.Option("--debug", help="Show full debug stack traces")] = False,
 ) -> None:
     """AgentIR global options."""
-    setup_logging(verbose=verbose, quiet=quiet)
+    setup_logging(verbose=verbose or debug, quiet=quiet)
 
 
 @app.command()

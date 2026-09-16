@@ -1,0 +1,53 @@
+name: Bug Report
+description: Report a defect, unexpected error, or incorrect compiler translation in AgentIR.
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue in AgentIR!
+
+  - type: input
+    id: version
+    attributes:
+      label: AgentIR Version
+      description: What version of AgentIR are you using? (Run `agentir version`)
+      placeholder: "e.g. 0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System & Python Version
+      description: What OS and Python version?
+      placeholder: "e.g. macOS 15, Python 3.12.3"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction Steps
+      description: Please provide step-by-step instructions, CLI commands, or sample manifests to reproduce the issue.
+      placeholder: |
+        1. Create manifest `agentir.yaml` with ...
+        2. Run `agentir migrate ...`
+        3. See error ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Command Output & Error Logs
+      description: Please paste the full CLI output or stack trace (run with `--verbose` if possible).
+      render: shell
