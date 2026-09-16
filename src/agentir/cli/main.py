@@ -7,13 +7,20 @@ from typing import Annotated, Any
 
 import typer
 
-from agentir.adapters.registry import get_adapter, list_registered_adapters
+from agentir.adapters.registry import (
+    detect_framework,
+    get_adapter,
+    list_registered_adapters,
+    resolve_framework_name,
+)
 from agentir.analysis.diff import compare_manifests
 from agentir.analysis.verification import verify_manifest
 from agentir.capabilities.analyzer import analyze_compatibility
 from agentir.capabilities.matrix import FRAMEWORK_CAPABILITY_MATRICES
 from agentir.capabilities.taxonomy import CAPABILITIES
+from agentir.cli.discovery import find_manifest
 from agentir.cli.presentation import (
+    console,
     output_json,
     print_error,
     print_success,
@@ -29,6 +36,7 @@ from agentir.domain.exceptions import AgentIRError
 from agentir.domain.instructions import InstructionsSpec
 from agentir.domain.manifest import AgentIRManifest
 from agentir.domain.model import ModelSpec
+from agentir.domain.skill import SkillSpec
 from agentir.domain.tool import ToolInputSchema, ToolParameterProperty, ToolSpec
 from agentir.infrastructure.logging import setup_logging
 from agentir.runtime.engine import DeterministicRuntime
@@ -77,11 +85,29 @@ def version(
 
 @app.command()
 def init(
-    name: Annotated[str, typer.Argument(help="Name of the agent system")] = "my_agent",
-    output: Annotated[Path, typer.Option("-o", "--output")] = Path("agentir.yaml"),
-    template: Annotated[str, typer.Option("-t", "--template", help="Template name")] = "minimal",
+    name: Annotated[str | None, typer.Argument(help="Agent system name")] = None,
+    output: Annotated[Path | None, typer.Option("-o", "--output")] = None,
+    template: Annotated[str, typer.Option("-t", "--template")] = "minimal",
+    interactive: Annotated[bool, typer.Option("--interactive/--no-interactive")] = True,
 ) -> None:
-    """Scaffold a starter AgentIR manifest file."""
+    """Scaffold a starter AgentIR manifest file with interactive assistance."""
+    is_interactive = interactive and sys.stdin.isatty() and sys.stdout.isatty()
+    target_name = name
+    target_template = template
+
+    if target_name is None:
+        if is_interactive:
+            console.print("[bold cyan]AgentIR Scaffolding Wizard[/bold cyan]")
+            target_name = typer.prompt("Agent System Name", default="my_agent")
+            target_template = typer.prompt(
+                "Select Architecture Template",
+                default="minimal",
+            )
+        else:
+            target_name = "my_agent"
+
+    target_output = output or Path("agentir.yaml")
+
     tool = ToolSpec(
         id="search_tool",
         name="Search Tool",
@@ -91,65 +117,83 @@ def init(
             required=("query",),
         ),
     )
-    tools = (tool,) if template in ("tools", "multi-agent") else ()
+    tools = (tool,) if target_template in ("tools", "multi-agent", "skills") else ()
+
+    skills: tuple[SkillSpec, ...] = ()
+    if target_template == "skills":
+        skills = (
+            SkillSpec(
+                id="research_skill",
+                name="Research Skill",
+                description="Web research methodology",
+                instructions="Always cross-reference multiple primary sources.",
+                tools=(tool,),
+            ),
+        )
+
     agent = AgentSpec(
-        id=f"{name}_agent",
-        name=name.replace("_", " ").title(),
+        id=f"{target_name}_agent",
+        name=target_name.replace("_", " ").title(),
         model=ModelSpec(provider="openai", model_id="gpt-4o", temperature=0.7),
         instructions=InstructionsSpec(
-            system_prompt=f"You are {name}, a helpful autonomous AI agent.",
+            system_prompt=f"You are {target_name}, a helpful autonomous AI agent.",
             guidelines=("Be concise", "Ensure accuracy"),
         ),
         tools=tools,
+        skills=skills,
     )
-    manifest = AgentIRManifest(name=name, agents=(agent,))
+    manifest = AgentIRManifest(name=target_name, agents=(agent,))
 
     content = serialize_manifest_to_yaml(manifest)
-    output.write_text(content, encoding="utf-8")
-    print_success(f"Initialized AgentIR manifest at '{output}'.")
+    target_output.write_text(content, encoding="utf-8")
+    print_success(f"Initialized AgentIR manifest at '{target_output}'.")
 
 
 @app.command()
 def validate(
-    path: Annotated[Path, typer.Argument(help="Path to manifest")] = Path("agentir.yaml"),
+    path: Annotated[Path | None, typer.Argument(help="Manifest path (auto-discovered)")] = None,
     json_output: Annotated[bool, typer.Option("--json", help="JSON output")] = False,
 ) -> None:
     """Validate syntax, schema, and domain invariants of an AgentIR manifest."""
     try:
-        manifest = load_manifest_from_file(path)
+        manifest_path = find_manifest(path)
+        manifest = load_manifest_from_file(manifest_path)
         manifest.validate_invariants()
         canonical_hash = compute_canonical_hash(manifest)
 
         if json_output:
             output_json({
                 "valid": True,
-                "file": str(path),
+                "file": str(manifest_path),
                 "name": manifest.name,
                 "canonical_hash": canonical_hash,
                 "agents_count": len(manifest.agents),
                 "workflows_count": len(manifest.workflows),
             })
         else:
-            print_success(f"Manifest '{path}' is valid! [dim]({canonical_hash[:12]}...)[/dim]")
+            short_h = canonical_hash[:12]
+            print_success(f"Manifest '{manifest_path.name}' is valid! [dim]({short_h}...)[/dim]")
     except Exception as e:
         if json_output:
-            output_json({"valid": False, "file": str(path), "error": str(e)})
+            output_json({"valid": False, "file": str(path) if path else None, "error": str(e)})
         else:
-            print_error(f"Validation failed for '{path}'", str(e))
+            print_error("Validation failed", str(e))
         raise typer.Exit(code=1) from e
 
 
 @app.command()
 def inspect(
-    path: Annotated[Path, typer.Argument(help="Path to manifest")] = Path("agentir.yaml"),
+    path: Annotated[Path | None, typer.Argument(help="Manifest path (auto-discovered)")] = None,
     json_output: Annotated[bool, typer.Option("--json", help="JSON output")] = False,
 ) -> None:
     """Inspect and display the structure of an AgentIR manifest."""
     try:
-        manifest = load_manifest_from_file(path)
+        manifest_path = find_manifest(path)
+        manifest = load_manifest_from_file(manifest_path)
         if json_output:
             data = {
                 "name": manifest.name,
+                "file": str(manifest_path),
                 "ir_version": manifest.ir_version,
                 "canonical_hash": compute_canonical_hash(manifest),
                 "agents": [
@@ -158,6 +202,7 @@ def inspect(
                         "name": a.name,
                         "model": f"{a.model.provider}/{a.model.model_id}",
                         "tools": [t.id for t in a.tools],
+                        "skills": [s.id for s in a.skills],
                         "handoffs": [h.target_agent_id for h in a.handoffs],
                     }
                     for a in manifest.agents
@@ -176,7 +221,7 @@ def inspect(
         else:
             render_inspect(manifest)
     except Exception as e:
-        print_error(f"Failed to inspect '{path}'", str(e))
+        print_error("Failed to inspect manifest", str(e))
         raise typer.Exit(code=1) from e
 
 
@@ -188,13 +233,14 @@ def capabilities(
     """Display the AgentIR capability taxonomy or framework support matrices."""
     if json_output:
         if framework:
-            fw_key = framework.lower().replace("-", "_")
-            if fw_key not in FRAMEWORK_CAPABILITY_MATRICES:
-                print_error(f"Unknown framework '{framework}'")
+            fw_key, suggestions = resolve_framework_name(framework)
+            if not fw_key or fw_key not in FRAMEWORK_CAPABILITY_MATRICES:
+                suggest_msg = f" Did you mean '{suggestions[0]}'?" if suggestions else ""
+                print_error(f"Unknown framework '{framework}'.{suggest_msg}")
                 raise typer.Exit(code=1)
             matrix = FRAMEWORK_CAPABILITY_MATRICES[fw_key]
             output_json({
-                "framework": framework,
+                "framework": fw_key,
                 "capabilities": {
                     k: {
                         "level": v.support_level.value,
@@ -221,17 +267,26 @@ def capabilities(
 
 @app.command()
 def check(
-    path: Annotated[Path, typer.Argument(help="Path to manifest")] = Path("agentir.yaml"),
+    path: Annotated[Path | None, typer.Argument(help="Manifest path")] = None,
     target: Annotated[str, typer.Option("-t", "--target", help="Target framework")] = "",
     json_output: Annotated[bool, typer.Option("--json", help="JSON output")] = False,
 ) -> None:
     """Analyze compatibility of an AgentIR manifest against a target framework."""
     if not target:
-        print_error("Missing required option '--target' / '-t'")
+        print_error("Missing required option '--target' / '-t' (e.g. --target langgraph)")
         raise typer.Exit(code=1)
+
     try:
-        manifest = load_manifest_from_file(path)
-        report = analyze_compatibility(manifest, target)
+        manifest_path = find_manifest(path)
+        manifest = load_manifest_from_file(manifest_path)
+
+        resolved_target, suggestions = resolve_framework_name(target)
+        if not resolved_target:
+            suggest_str = f" Did you mean '{suggestions[0]}'?" if suggestions else ""
+            print_error(f"Unknown target framework '{target}'.{suggest_str}")
+            raise typer.Exit(code=1)
+
+        report = analyze_compatibility(manifest, resolved_target)
 
         if json_output:
             output_json(report.to_dict())
@@ -254,11 +309,24 @@ def import_cmd(
     json_output: Annotated[bool, typer.Option("--json", help="JSON output")] = False,
 ) -> None:
     """Import a framework agent or workflow definition into canonical AgentIR."""
-    if not framework:
-        print_error("Missing required option '--framework' / '-f'")
-        raise typer.Exit(code=1)
+    resolved_framework = framework
+    if not resolved_framework:
+        detected = detect_framework(source)
+        if detected:
+            resolved_framework = detected
+            if not json_output:
+                msg = f"[dim]Auto-detected framework: [bold cyan]{detected}[/bold cyan][/dim]"
+                console.print(msg)
+        else:
+            available = list_registered_adapters()
+            print_error(
+                f"Could not auto-detect framework for '{source}'. "
+                f"Please specify --framework. Available: {available}"
+            )
+            raise typer.Exit(code=1)
+
     try:
-        adapter = get_adapter(framework)
+        adapter = get_adapter(resolved_framework)
         manifest = adapter.import_manifest(source)
 
         if output:
@@ -287,7 +355,7 @@ def import_cmd(
 
 @app.command()
 def export(
-    path: Annotated[Path, typer.Argument(help="Path to manifest")] = Path("agentir.yaml"),
+    path: Annotated[Path | None, typer.Argument(help="Manifest path")] = None,
     target: Annotated[str, typer.Option("-t", "--target", help="Target framework")] = "",
     output: Annotated[Path, typer.Option("-o", "--output", help="Output directory")] = Path("dist"),
     json_output: Annotated[bool, typer.Option("--json", help="JSON output")] = False,
@@ -296,8 +364,10 @@ def export(
     if not target:
         print_error("Missing required option '--target' / '-t'")
         raise typer.Exit(code=1)
+
     try:
-        manifest = load_manifest_from_file(path)
+        manifest_path = find_manifest(path)
+        manifest = load_manifest_from_file(manifest_path)
         adapter = get_adapter(target)
         generated = adapter.export_manifest(manifest, output)
 
@@ -327,14 +397,27 @@ def migrate(
     json_output: Annotated[bool, typer.Option("--json", help="JSON output")] = False,
 ) -> None:
     """Execute end-to-end migration between two agent frameworks."""
-    if not from_framework or not to_framework:
-        print_error("Missing required options '--from' and/or '--to'")
+    if not to_framework:
+        print_error("Missing required option '--to'")
         raise typer.Exit(code=1)
+
+    resolved_from = from_framework
+    if not resolved_from:
+        detected = detect_framework(source)
+        if detected:
+            resolved_from = detected
+            if not json_output:
+                msg = f"[dim]Auto-detected framework: [bold cyan]{detected}[/bold cyan][/dim]"
+                console.print(msg)
+        else:
+            print_error("Could not auto-detect source framework. Please specify '--from'.")
+            raise typer.Exit(code=1)
+
     try:
-        if from_framework.lower() == "agentir":
+        if resolved_from.lower() == "agentir":
             manifest = load_manifest_from_file(source)
         else:
-            src_adapter = get_adapter(from_framework)
+            src_adapter = get_adapter(resolved_from)
             manifest = src_adapter.import_manifest(source)
 
         result = compile_migration(
@@ -350,7 +433,7 @@ def migrate(
         else:
             msg = (
                 f"Migration completed! Migrated '{source.name}' from "
-                f"{from_framework} to {to_framework}."
+                f"{resolved_from} to {to_framework}."
             )
             print_success(msg)
             typer.echo(f"Output directory: {result.output_directory}")
@@ -394,12 +477,13 @@ def diff(
 
 @app.command()
 def verify(
-    path: Annotated[Path, typer.Argument(help="Path to manifest")] = Path("agentir.yaml"),
+    path: Annotated[Path | None, typer.Argument(help="Manifest path")] = None,
     json_output: Annotated[bool, typer.Option("--json", help="JSON output")] = False,
 ) -> None:
     """Run full verification suite on an AgentIR manifest."""
     try:
-        manifest = load_manifest_from_file(path)
+        manifest_path = find_manifest(path)
+        manifest = load_manifest_from_file(manifest_path)
         report = verify_manifest(manifest)
 
         if json_output:
@@ -414,6 +498,72 @@ def verify(
     except Exception as e:
         print_error("Verification encountered an error", str(e))
         raise typer.Exit(code=1) from e
+
+
+@app.command()
+def run(
+    path: Annotated[Path | None, typer.Argument(help="Manifest path")] = None,
+    input_text: Annotated[str | None, typer.Option("-i", "--input", help="User input")] = None,
+    max_turns: Annotated[int, typer.Option("--max-turns", help="Maximum turns")] = 10,
+    json_output: Annotated[bool, typer.Option("--json", help="JSON output")] = False,
+) -> None:
+    """Run a deterministic dry-run simulation or interactive conversational REPL."""
+    try:
+        manifest_path = find_manifest(path)
+        manifest = load_manifest_from_file(manifest_path)
+    except Exception as e:
+        print_error("Could not load manifest", str(e))
+        raise typer.Exit(code=1) from e
+
+    runtime = DeterministicRuntime()
+
+    # One-shot mode
+    if input_text is not None or json_output or not sys.stdin.isatty():
+        prompt = input_text or "Hello"
+        result = runtime.run(manifest, user_input=prompt, max_turns=max_turns)
+        if json_output:
+            output_json(result.to_dict())
+        else:
+            status_style = "bold green" if result.success else "bold red"
+            status_str = "SUCCESS" if result.success else "HALTED"
+            msg = f"Simulation completed! Status: [{status_style}]{status_str}[/{status_style}]"
+            print_success(msg)
+            typer.echo(f"Final output: {result.final_output}")
+            typer.echo(f"Total steps: {len(result.steps)}")
+            if result.halt_reason:
+                typer.echo(f"Halt reason: {result.halt_reason}")
+        return
+
+    # Interactive REPL mode
+    primary = manifest.agents[0] if manifest.agents else None
+    agent_title = f"{primary.name} ({primary.model.model_id})" if primary else manifest.name
+    console.print(
+        f"\n[bold cyan]AgentIR Interactive Simulation REPL[/bold cyan] "
+        f"[dim]• Agent: [green]{agent_title}[/green] • Type 'exit' to quit[/dim]\n"
+    )
+
+    while True:
+        try:
+            user_msg = console.input("[bold blue]User > [/bold blue]").strip()
+            if not user_msg:
+                continue
+            if user_msg.lower() in ("exit", "quit", "q"):
+                console.print("[dim]Exiting simulation REPL.[/dim]")
+                break
+
+            res = runtime.run(manifest, user_input=user_msg, max_turns=max_turns)
+            if res.success:
+                console.print(f"[bold green]Agent >[/bold green] {res.final_output}")
+                tool_calls = [s for s in res.steps if s.action == "tool_call"]
+                if tool_calls:
+                    for tc in tool_calls:
+                        msg = f"  [dim]↳ Tool: {tc.input_payload} -> {tc.output_payload}[/dim]"
+                        console.print(msg)
+            else:
+                console.print(f"[bold red]Halted >[/bold red] {res.final_output}")
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[dim]Simulation REPL terminated.[/dim]")
+            break
 
 
 @app.command()
@@ -457,47 +607,20 @@ def doctor(
         typer.echo(f"Write permissions: {'OK' if diag['write_permission'] else 'FAILED'}")
 
 
-@app.command()
-def run(
-    path: Annotated[Path, typer.Argument(help="Path to manifest")] = Path("agentir.yaml"),
-    input_text: Annotated[str, typer.Option("-i", "--input", help="User input")] = "Hello",
-    max_turns: Annotated[int, typer.Option("--max-turns", help="Maximum turns")] = 10,
-    json_output: Annotated[bool, typer.Option("--json", help="JSON output")] = False,
-) -> None:
-    """Run an offline deterministic dry-run simulation of an AgentIR system."""
-    try:
-        manifest = load_manifest_from_file(path)
-        runtime = DeterministicRuntime()
-        result = runtime.run(manifest, user_input=input_text, max_turns=max_turns)
-        if json_output:
-            output_json(result.to_dict())
-        else:
-            status_style = "bold green" if result.success else "bold red"
-            status_str = "SUCCESS" if result.success else "HALTED"
-            msg = f"Simulation completed! Status: [{status_style}]{status_str}[/{status_style}]"
-            print_success(msg)
-            typer.echo(f"Final output: {result.final_output}")
-            typer.echo(f"Total steps: {len(result.steps)}")
-            if result.halt_reason:
-                typer.echo(f"Halt reason: {result.halt_reason}")
-    except Exception as e:
-        print_error("Simulation failed", str(e))
-        raise typer.Exit(code=1) from e
-
-
 mcp_app = typer.Typer(name="mcp", help="Model Context Protocol (MCP) commands.")
 app.add_typer(mcp_app)
 
 
 @mcp_app.command(name="export")
 def mcp_export(
-    path: Annotated[Path, typer.Argument(help="Path to manifest")] = Path("agentir.yaml"),
+    path: Annotated[Path | None, typer.Argument(help="Manifest path")] = None,
     output: Annotated[Path, typer.Option("-o", "--output")] = Path("mcp_server"),
     json_output: Annotated[bool, typer.Option("--json", help="JSON output")] = False,
 ) -> None:
     """Export AgentIR tools as an executable MCP tool server."""
     try:
-        manifest = load_manifest_from_file(path)
+        manifest_path = find_manifest(path)
+        manifest = load_manifest_from_file(manifest_path)
         adapter = get_adapter("mcp")
         files = adapter.export_manifest(manifest, output)
         if json_output:
@@ -534,6 +657,13 @@ def mcp_import(
     except Exception as e:
         print_error("MCP import failed", str(e))
         raise typer.Exit(code=1) from e
+
+
+# Aliases for effortless developer experience
+app.command(name="sim", help="Alias for 'run'")(run)
+app.command(name="doc", help="Alias for 'doctor'")(doctor)
+app.command(name="cap", help="Alias for 'capabilities'")(capabilities)
+app.command(name="show", help="Alias for 'inspect'")(inspect)
 
 
 if __name__ == "__main__":

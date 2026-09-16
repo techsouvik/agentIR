@@ -8,9 +8,11 @@ from agentir.adapters.lyzr.adapter import LyzrAdapter
 from agentir.adapters.mcp.adapter import MCPAdapter
 from agentir.adapters.openai_agents.adapter import OpenAIAgentsAdapter
 from agentir.adapters.registry import (
+    detect_framework,
     get_adapter,
     list_registered_adapters,
     register_adapter,
+    resolve_framework_name,
 )
 
 # Register all built-in framework adapters
@@ -30,7 +32,9 @@ __all__ = [
     "LyzrAdapter",
     "MCPAdapter",
     "OpenAIAgentsAdapter",
+    "detect_framework",
     "get_adapter",
     "list_registered_adapters",
     "register_adapter",
+    "resolve_framework_name",
 ]
