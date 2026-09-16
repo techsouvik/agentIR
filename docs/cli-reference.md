@@ -1,6 +1,21 @@
 # AgentIR CLI Reference Manual
 
-The `agentir` CLI is the developer interface for inspecting, validating, analyzing, compiling, and running AgentIR systems.
+The `agentir` CLI is the developer interface for inspecting, validating, analyzing, compiling, simulating, and running AgentIR systems.
+
+---
+
+## Ergonomic Features & Modern CLI UX
+
+- **Zero-Config Auto-Discovery**: When `PATH` is omitted from `validate`, `inspect`, `check`, `export`, `verify`, or `run`, AgentIR automatically discovers `agentir.yaml`, `agentir.yml`, or `agentir.json` in the current directory or parent directories.
+- **Framework Auto-Detection**: When importing or migrating code, `--framework` and `--from` can be omitted; AgentIR statically inspects imports and AST structure to fingerprint the source framework automatically.
+- **Interactive Scaffolding Wizard**: Running `agentir init` in an interactive terminal prompts with friendly defaults.
+- **Interactive Simulation REPL**: Running `agentir run` without an input prompt launches an interactive conversational chat session with the simulated agent.
+- **Fuzzy Target Matching**: Catches typos like `--target open_agents` and suggests `Did you mean 'openai_agents'?`.
+- **Command Aliases**:
+  - `agentir sim`: Alias for `agentir run`
+  - `agentir doc`: Alias for `agentir doctor`
+  - `agentir cap`: Alias for `agentir capabilities`
+  - `agentir show`: Alias for `agentir inspect`
 
 ---
 
