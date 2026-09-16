@@ -179,6 +179,7 @@ agentir run agentir.yaml --input "Can you check my tracking status?"
 | `agentir diff` | Compute semantic difference impact (BREAKING vs ADDITIVE). |
 | `agentir verify` | Run full verification suite (reachability, cycles, secret leaks). |
 | `agentir run` | Offline deterministic turn simulation without external LLMs. |
+| `agentir chat` | Live conversational agent harness connecting to OpenAI, Ollama, Groq. |
 | `agentir mcp export` | Export tools as an executable MCP tool server. |
 | `agentir mcp import` | Ingest tools from an MCP tool catalog JSON into AgentIR. |
 

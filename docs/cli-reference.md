@@ -241,19 +241,44 @@ agentir verify support.yaml
 ---
 
 ### `agentir run`
-Simulate agent turns, tool calls, and state transitions offline without external LLM API keys.
+Simulate agent turns, tool calls, and state transitions offline without external LLM API keys (or connect to real models with `--live`).
 
 **Arguments:**
-- `PATH`: Path to AgentIR manifest.
+- `PATH`: Path to AgentIR manifest (auto-discovered if omitted).
 
 **Options:**
 - `-i`, `--input TEXT`: User prompt message (default: `"Hello"`).
 - `--max-turns N`: Maximum simulated turns (default: 10).
+- `--live`: Connect to live foundation model (delegates to `agentir chat`).
 - `--json`: Output step-by-step trace JSON.
 
 **Example:**
 ```bash
 agentir run support.yaml --input "Check order #1042"
+agentir run --live
+```
+
+---
+
+### `agentir chat`
+Chat live with an AgentIR agent using real foundation models (OpenAI, local Ollama, OpenRouter, Groq).
+
+**Arguments:**
+- `PATH`: Path to AgentIR manifest (auto-discovered if omitted).
+
+**Options:**
+- `--base-url URL`: Endpoint base URL (e.g. `http://localhost:11434/v1` for local Ollama).
+- `--api-key KEY`: API key (or reads `OPENAI_API_KEY` from environment).
+- `-m`, `--model ID`: Override model identifier.
+
+**Example:**
+```bash
+# Chat using OpenAI
+export OPENAI_API_KEY=sk-...
+agentir chat
+
+# Chat using local Ollama (100% private, free)
+agentir chat --base-url http://localhost:11434/v1 -m llama3
 ```
 
 ---

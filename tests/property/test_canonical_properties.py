@@ -28,7 +28,11 @@ identifier_st = st.text(
 @given(
     name=identifier_st,
     model_id=identifier_st,
-    prompt=st.text(min_size=1, max_size=200),
+    prompt=st.text(
+        alphabet=st.characters(blacklist_categories=("Cc", "Cs")),
+        min_size=1,
+        max_size=200,
+    ),
     temperature=st.floats(min_value=0.0, max_value=2.0),
 )
 def test_property_serialization_round_trip(

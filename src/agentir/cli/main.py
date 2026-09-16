@@ -1,5 +1,6 @@
 """AgentIR CLI — Command Line Interface for Agent Intermediate Representation."""
 
+import os
 import platform
 import sys
 from pathlib import Path
@@ -32,7 +33,7 @@ from agentir.cli.presentation import (
 )
 from agentir.compiler.pipeline import compile_migration
 from agentir.domain.agent import AgentSpec
-from agentir.domain.exceptions import AgentIRError
+from agentir.domain.exceptions import AgentIRError, SecurityError
 from agentir.domain.instructions import InstructionsSpec
 from agentir.domain.manifest import AgentIRManifest
 from agentir.domain.model import ModelSpec
@@ -40,6 +41,7 @@ from agentir.domain.skill import SkillSpec
 from agentir.domain.tool import ToolInputSchema, ToolParameterProperty, ToolSpec
 from agentir.infrastructure.logging import setup_logging
 from agentir.runtime.engine import DeterministicRuntime
+from agentir.runtime.live import LiveRuntime
 from agentir.schema.canonical import compute_canonical_hash
 from agentir.schema.serializer import (
     load_manifest_from_file,
@@ -505,9 +507,14 @@ def run(
     path: Annotated[Path | None, typer.Argument(help="Manifest path")] = None,
     input_text: Annotated[str | None, typer.Option("-i", "--input", help="User input")] = None,
     max_turns: Annotated[int, typer.Option("--max-turns", help="Maximum turns")] = 10,
+    live: Annotated[bool, typer.Option("--live", help="Connect to live foundation model")] = False,
     json_output: Annotated[bool, typer.Option("--json", help="JSON output")] = False,
 ) -> None:
     """Run a deterministic dry-run simulation or interactive conversational REPL."""
+    if live:
+        chat(path=path)
+        return
+
     try:
         manifest_path = find_manifest(path)
         manifest = load_manifest_from_file(manifest_path)
@@ -564,6 +571,104 @@ def run(
         except (KeyboardInterrupt, EOFError):
             console.print("\n[dim]Simulation REPL terminated.[/dim]")
             break
+
+
+@app.command()
+def chat(
+    path: Annotated[Path | None, typer.Argument(help="Manifest path (auto-discovered)")] = None,
+    base_url: Annotated[str | None, typer.Option("--base-url", help="Endpoint URL")] = None,
+    api_key: Annotated[str | None, typer.Option("--api-key", help="API key")] = None,
+    model: Annotated[str | None, typer.Option("-m", "--model", help="Model override")] = None,
+) -> None:
+    """Chat live with an AgentIR agent using real foundation models (OpenAI, Ollama, Groq)."""
+    try:
+        manifest_path = find_manifest(path)
+        manifest = load_manifest_from_file(manifest_path)
+    except Exception as e:
+        print_error("Could not load manifest", str(e))
+        raise typer.Exit(code=1) from e
+
+    if not manifest.agents:
+        print_error("Manifest declares no agents to chat with.")
+        raise typer.Exit(code=1)
+
+    target_agent = manifest.agents[0]
+    if model:
+        target_agent = AgentSpec(
+            id=target_agent.id,
+            name=target_agent.name,
+            model=ModelSpec(provider=target_agent.model.provider, model_id=model),
+            instructions=target_agent.instructions,
+            tools=target_agent.tools,
+            skills=target_agent.skills,
+            guards=target_agent.guards,
+        )
+
+    resolved_base_url = (
+        base_url or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+    )
+    resolved_api_key = (
+        api_key or os.environ.get("OPENAI_API_KEY") or os.environ.get("AGENTIR_API_KEY")
+    )
+
+    is_local = "localhost" in resolved_base_url or "127.0.0.1" in resolved_base_url
+    if not resolved_api_key and not is_local:
+        console.print(
+            "\n[bold yellow]Notice:[/bold yellow] No OPENAI_API_KEY found in environment.\n"
+            "• Provide one via [bold]export OPENAI_API_KEY=sk-...[/bold]\n"
+            "• Or point to local Ollama with [bold]--base-url http://localhost:11434/v1[/bold]\n"
+            "• Or run [bold]agentir run[/bold] for offline deterministic simulation.\n"
+        )
+        raise typer.Exit(code=1)
+
+    def approval_prompt(name: str, args: dict[str, Any]) -> bool:
+        prompt_str = f"[bold yellow]Execute tool '{name}' ({args})? [y/N]: [/bold yellow]"
+        choice = console.input(prompt_str).strip().lower()
+        return choice in ("y", "yes")
+
+    runtime = LiveRuntime(
+        base_url=resolved_base_url,
+        api_key=resolved_api_key,
+        approval_hook=approval_prompt,
+    )
+
+    console.print(
+        f"\n[bold cyan]AgentIR Live Agent Harness[/bold cyan] • "
+        f"Agent: [bold green]{target_agent.name}[/bold green] "
+        f"([blue]{target_agent.model.model_id}[/blue])\n"
+        f"[dim]Endpoint: {resolved_base_url} • Type 'exit' to quit[/dim]\n"
+    )
+
+    messages: list[dict[str, Any]] = []
+    while True:
+        try:
+            user_text = console.input("[bold blue]User > [/bold blue]").strip()
+            if not user_text:
+                continue
+            if user_text.lower() in ("exit", "quit", "q"):
+                console.print("[dim]Exiting live chat.[/dim]")
+                break
+
+            messages.append({"role": "user", "content": user_text})
+            turn = runtime.chat_turn(manifest, messages=messages, agent=target_agent)
+
+            for tr in turn.tool_results:
+                status_clr = "green" if tr.approved else "red"
+                tc_msg = (
+                    f"  [dim]↳ Tool: [{status_clr}]{tr.tool_name}[/{status_clr}]"
+                    f"({tr.arguments}) -> {tr.output}[/dim]"
+                )
+                console.print(tc_msg)
+
+            console.print(f"[bold green]Agent >[/bold green] {turn.assistant_reply}")
+            messages.append({"role": "assistant", "content": turn.assistant_reply})
+        except SecurityError as se:
+            console.print(f"[bold red]Blocked by Guard >[/bold red] {se}")
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[dim]Live chat session ended.[/dim]")
+            break
+        except Exception as err:
+            console.print(f"[bold red]Error >[/bold red] {err}")
 
 
 @app.command()
