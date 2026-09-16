@@ -371,6 +371,10 @@ class LangGraphAdapter(FrameworkAdapter):
         wf = manifest.workflows[0] if manifest.workflows else None
         entry_node = wf.entry_node_id if wf else "agent_node"
 
+        has_persistent_memory = False
+        if manifest.agents and manifest.agents[0].memory:
+            has_persistent_memory = manifest.agents[0].memory.persist_across_sessions
+
         code_lines.extend(
             [
                 "builder = StateGraph(AgentState)",
@@ -405,10 +409,25 @@ class LangGraphAdapter(FrameworkAdapter):
             code_lines.append('builder.add_edge("agent_node", "tool_node")')
             code_lines.append('builder.add_edge("tool_node", END)')
 
+        if has_persistent_memory:
+            code_lines.insert(6, "from langgraph.checkpoint.memory import MemorySaver")
+            code_lines.extend(
+                [
+                    "",
+                    "checkpointer = MemorySaver()",
+                    "graph = builder.compile(checkpointer=checkpointer)",
+                ]
+            )
+        else:
+            code_lines.extend(
+                [
+                    "",
+                    "graph = builder.compile()",
+                ]
+            )
+
         code_lines.extend(
             [
-                "",
-                "graph = builder.compile()",
                 "",
                 'if __name__ == "__main__":',
                 '    inputs = {"messages": [HumanMessage(content="Hello")]}',

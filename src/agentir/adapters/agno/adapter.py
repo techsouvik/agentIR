@@ -211,23 +211,37 @@ class AgnoAdapter(FrameworkAdapter):
                 ]
             )
 
+        # Check persistent storage
+        has_storage = any(
+            a.memory and a.memory.persist_across_sessions for a in manifest.agents
+        )
+        if has_storage:
+            code_lines.insert(6, "from agno.storage.agent.sqlite import SqliteAgentStorage")
+
         # Generate Agents
         tools_repr = f"[{', '.join(tool_names)}]" if tool_names else "[]"
         if manifest.agents:
             for _idx, a in enumerate(manifest.agents):
                 var_name = f"agent_{a.id}" if len(manifest.agents) > 1 else "agent"
-                code_lines.extend(
+                agent_def = [
+                    f"{var_name} = Agent(",
+                    f'    name="{a.name}",',
+                    f'    model=OpenAIChat(id="{a.model.model_id}"),',
+                    f'    instructions="""{a.instructions.system_prompt}""",',
+                    f"    tools={tools_repr},",
+                ]
+                if a.memory and a.memory.persist_across_sessions:
+                    agent_def.append(
+                        '    storage=SqliteAgentStorage(table_name="sessions"),'
+                    )
+                agent_def.extend(
                     [
-                        f"{var_name} = Agent(",
-                        f'    name="{a.name}",',
-                        f'    model=OpenAIChat(id="{a.model.model_id}"),',
-                        f'    instructions="""{a.instructions.system_prompt}""",',
-                        f"    tools={tools_repr},",
                         "    markdown=True,",
                         ")",
                         "",
                     ]
                 )
+                code_lines.extend(agent_def)
         else:
             code_lines.extend(
                 [

@@ -293,12 +293,15 @@ class CrewAIAdapter(FrameworkAdapter):
         agents_repr = f"[{', '.join(agent_var_map.values())}]"
         tasks_repr = f"[{', '.join(task_vars)}]"
 
+        has_memory = any(a.memory is not None for a in manifest.agents)
+        mem_arg = "    memory=True,\n" if has_memory else ""
+
         code_lines.extend(
             [
                 "crew = Crew(",
                 f"    agents={agents_repr},",
                 f"    tasks={tasks_repr},",
-                "    process=Process.sequential,",
+                f"{mem_arg}    process=Process.sequential,",
                 ")",
                 "",
                 'if __name__ == "__main__":',
