@@ -1,0 +1,42 @@
+framework: langgraph
+name: LangGraph Customer Support
+workflow_id: customer_support
+entry_node: triage
+finish_nodes:
+  - END
+model:
+  provider: openai
+  model_id: gpt-4o
+  temperature: 0.2
+system_prompt: You are a customer support agent.
+tools:
+  - name: lookup_order
+    description: Fetch order details by order id
+    parameters:
+      - name: order_id
+        type: string
+        required: true
+state:
+  channels:
+    - key: messages
+      type: list
+      reducer: append
+    - key: customer_id
+      type: string
+      reducer: replace
+nodes:
+  - id: triage
+    type: agent
+    name: Triage Agent
+  - id: order_tool
+    type: tool
+    name: Order Lookup Tool
+    tool_id: lookup_order
+edges:
+  - source: triage
+    is_conditional: true
+    path_map:
+      has_order: order_tool
+      resolved: END
+  - source: order_tool
+    target: triage

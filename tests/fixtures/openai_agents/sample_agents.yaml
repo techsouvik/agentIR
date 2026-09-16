@@ -1,0 +1,26 @@
+framework: openai_agents
+name: OpenAI Multi-Agent Support
+agents:
+  - id: triage
+    name: Triage Agent
+    model: gpt-4o
+    instructions: Route customer questions to appropriate department.
+    handoffs:
+      - target: tech_support
+        description: Forward technical issues
+    guardrails:
+      - name: pii_filter
+        stage: input
+        rule_type: regex_pattern
+        pattern: "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+  - id: tech_support
+    name: Technical Support
+    model: gpt-4o-mini
+    instructions: Diagnose technical errors and guide users.
+    tools:
+      - name: ping_server
+        description: Check server status
+        parameters:
+          - name: host
+            type: string
+            required: true

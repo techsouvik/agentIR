@@ -1,0 +1,9 @@
+framework: lyzr
+name: Lyzr Report Generator
+id: report_agent
+role: Senior Financial Analyst
+prompt_persona: You are a senior financial analyst generating quarterly audit reports.
+model: gpt-4o
+tools:
+  - name: calculate_ratios
+    description: Calculate key financial liquidity ratios

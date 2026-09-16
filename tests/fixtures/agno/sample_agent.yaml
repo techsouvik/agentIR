@@ -1,0 +1,26 @@
+framework: agno
+name: Agno Customer Support
+agents:
+  - id: support_specialist
+    name: Support Specialist
+    model:
+      provider: openai
+      model_id: gpt-4o
+      temperature: 0.5
+    instructions: You are an Agno customer support specialist.
+    tools:
+      - name: fetch_account_info
+        description: Retrieve account profile
+        parameters:
+          - name: account_id
+            type: string
+            required: true
+    handoffs:
+      - target: billing_specialist
+        description: Escalate to billing team
+  - id: billing_specialist
+    name: Billing Specialist
+    model:
+      provider: openai
+      model_id: gpt-4o
+    instructions: You handle billing inquiries and refunds.
