@@ -1,0 +1,52 @@
+name: Deep Research Team
+ir_version: "0.1.0"
+description: Multi-agent research collaboration team composed of lead researcher and technical writer.
+agents:
+  - id: lead_researcher
+    name: Lead Researcher
+    model:
+      provider: openai
+      model_id: gpt-4o
+      temperature: 0.3
+    instructions:
+      system_prompt: You coordinate deep research investigations and delegate report writing.
+      guidelines:
+        - Cross-examine multiple primary sources.
+        - Delegate final markdown synthesis to the writer.
+    tools:
+      - id: web_search
+        name: Web Search
+        description: Search web indices for recent facts and whitepapers
+        input_schema:
+          type: object
+          properties:
+            - name: query
+              type: string
+              description: Search query terms
+              required: true
+            - name: limit
+              type: integer
+              description: Max results
+              default: 5
+          required:
+            - query
+    handoffs:
+      - target_agent_id: report_writer
+        description: Delegate synthesis and drafting to technical writer
+    memory:
+      memory_type: conversation_buffer
+      max_messages: 50
+  - id: report_writer
+    name: Technical Writer
+    model:
+      provider: anthropic
+      model_id: claude-3-5-sonnet
+      temperature: 0.5
+    instructions:
+      system_prompt: You draft structured, executive-ready technical briefing memos.
+      guidelines:
+        - Use clear headings.
+        - Provide actionable executive takeaways.
+    output:
+      format: markdown
+      description: Executive memo in GitHub-flavored markdown

@@ -1,0 +1,43 @@
+name: Enterprise IT Triage
+ir_version: "0.1.0"
+description: Multi-agent handoff network with regex safety guardrails for internal IT support.
+agents:
+  - id: it_triage
+    name: IT Triage
+    model:
+      provider: openai
+      model_id: gpt-4o
+      temperature: 0.1
+    instructions:
+      system_prompt: You triage internal employee IT requests and escalate to network or hardware specialists.
+    handoffs:
+      - target_agent_id: network_engineer
+        description: Escalate VPN, firewall, or DNS connectivity issues
+    guards:
+      - name: password_filter
+        stage: input
+        rule_type: regex_pattern
+        pattern_or_rule: "(password|passwd|secret)\\s*[:=]"
+        action_on_failure: abort
+        description: Abort execution if user accidentally inputs passwords
+  - id: network_engineer
+    name: Network Engineer
+    model:
+      provider: openai
+      model_id: gpt-4o
+      temperature: 0.2
+    instructions:
+      system_prompt: You diagnose corporate network connectivity and VPN tunnels.
+    tools:
+      - id: ping_gateway
+        name: Ping Gateway
+        description: Test packet latency and reachability to corporate gateways
+        input_schema:
+          type: object
+          properties:
+            - name: host
+              type: string
+              description: Hostname or IP
+              required: true
+          required:
+            - host

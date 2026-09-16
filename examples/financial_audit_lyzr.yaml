@@ -1,0 +1,44 @@
+name: Financial Audit Pipeline
+ir_version: "0.1.0"
+description: Sequential financial compliance pipeline with liquidity ratio calculation tools.
+agents:
+  - id: compliance_auditor
+    name: Compliance Auditor
+    model:
+      provider: openai
+      model_id: gpt-4o
+      temperature: 0.1
+    instructions:
+      system_prompt: You audit quarterly financial balance sheets and verify regulatory filings.
+      role: Senior Compliance Officer
+    tools:
+      - id: ratio_calculator
+        name: Ratio Calculator
+        description: Computes current ratio, quick ratio, and debt-to-equity metrics
+        input_schema:
+          type: object
+          properties:
+            - name: current_assets
+              type: number
+              required: true
+            - name: current_liabilities
+              type: number
+              required: true
+          required:
+            - current_assets
+            - current_liabilities
+        is_pure: true
+workflows:
+  - id: audit_pipeline
+    name: Audit Pipeline
+    entry_node_id: audit_task
+    finish_node_ids:
+      - END
+    nodes:
+      - id: audit_task
+        type: agent
+        name: Run Compliance Audit
+        agent_id: compliance_auditor
+    edges:
+      - source_node_id: audit_task
+        target_node_id: END

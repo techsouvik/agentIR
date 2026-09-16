@@ -1,0 +1,64 @@
+name: Customer Support System
+ir_version: "0.1.0"
+description: Multi-turn customer support workflow with conditional tool execution and message history.
+agents:
+  - id: support_agent
+    name: Support Specialist
+    model:
+      provider: openai
+      model_id: gpt-4o
+      temperature: 0.2
+    instructions:
+      system_prompt: You are a Tier-1 customer support specialist. Help customers troubleshoot issues politely.
+      guidelines:
+        - Be polite and professional.
+        - Lookup order status before making refund commitments.
+    tools:
+      - id: lookup_order
+        name: Lookup Order
+        description: Query order database by customer or order identifier
+        input_schema:
+          type: object
+          properties:
+            - name: order_id
+              type: string
+              description: The customer's order ID
+              required: true
+          required:
+            - order_id
+    execution_policy:
+      max_turns: 15
+      timeout_seconds: 120.0
+      streaming: true
+workflows:
+  - id: support_graph
+    name: Customer Support Graph
+    entry_node_id: triage_node
+    finish_node_ids:
+      - END
+    nodes:
+      - id: triage_node
+        type: agent
+        name: Triage Turn
+        agent_id: support_agent
+      - id: tool_node
+        type: tool
+        name: Order Tool
+        tool_id: lookup_order
+    edges:
+      - source_node_id: triage_node
+        is_conditional: true
+        path_map:
+          need_order: tool_node
+          resolved: END
+      - source_node_id: tool_node
+        target_node_id: triage_node
+    state:
+      schema_name: SupportState
+      channels:
+        - key: messages
+          type_name: list
+          reducer: append
+        - key: customer_id
+          type_name: str
+          reducer: replace
